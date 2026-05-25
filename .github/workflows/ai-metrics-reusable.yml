@@ -51,6 +51,7 @@ jobs:
           # Count AI-tagged lines by scanning the HEAD version of changed files for START/END tags
           TOTAL_AI=0
           for f in $(git diff --name-only "$BASE_BRANCH"...HEAD); do
+            ai_count=0  # Initialize to 0 for each file
             # ensure file exists at HEAD (skip deleted files)
             if git ls-tree -r --name-only HEAD | grep -qx "$f"; then
               # extract AI-generated sections from the HEAD file and count their lines
