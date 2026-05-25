@@ -45,13 +45,20 @@ jobs:
 
           BASE_BRANCH="origin/${{ github.event.pull_request.base.ref }}"
 
-          # Sum AI lines from commit messages matching the tag
-          TOTAL_AI=$(git log "$BASE_BRANCH"..HEAD --grep="AI-Lines-Of-Code:" --format="%B" | awk '/AI-Lines-Of-Code:/ {sum+=$2} END {print sum+0}')
-
           # Total lines added in PR (sum of additions across the combined diff)
           TOTAL_ADDED=$(git diff --numstat "$BASE_BRANCH"...HEAD | awk '{add+=$1} END {print add+0}')
 
-          # Human-written lines = total added - AI annotated lines
+          # Count AI-tagged lines by scanning the HEAD version of changed files for START/END tags
+          TOTAL_AI=0
+          for f in $(git diff --name-only "$BASE_BRANCH"...HEAD); do
+            # ensure file exists at HEAD (skip deleted files)
+            if git ls-tree -r --name-only HEAD | grep -qx "$f"; then
+              # extract AI-generated sections from the HEAD file and count their lines
+              TOTAL_AI=$((TOTAL_AI + ai_count))
+            fi
+          done
+
+          # Human-written lines = total added - AI detected lines
           TOTAL_HUMAN=$((TOTAL_ADDED - TOTAL_AI))
           if [ "$TOTAL_HUMAN" -lt 0 ]; then TOTAL_HUMAN=0; fi
 

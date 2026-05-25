@@ -5,7 +5,8 @@ permissions:
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited, ready_for_review]
+    # Run when the branch is updated or the PR is marked ready — avoids running on initial open
+    types: [synchronize, ready_for_review, reopened]
 
 jobs:
   invoke-reusable:
