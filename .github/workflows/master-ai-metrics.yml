@@ -2,7 +2,6 @@ name: Master AI Metrics on Push
 
 permissions:
   contents: read
-  issues: write
 
 on:
   push:
@@ -41,6 +40,7 @@ jobs:
             [ -z "$f" ] && continue
             # make sure file exists at AFTER
             if git ls-tree -r --name-only "$AFTER" | grep -qx "$f"; then
+              ai_count=$(git show "$AFTER":"$f" 2>/dev/null | awk '/START OF AI GENERATED/{in=1;next} /END OF AI GENERATED/{in=0} in{count++} END{print count+0}' || true)
               TOTAL_AI=$((TOTAL_AI + ${ai_count:-0}))
             fi
           done
@@ -54,36 +54,17 @@ jobs:
 
           echo "Computed: AI=$TOTAL_AI, Added=$TOTAL_ADDED, Human=$TOTAL_HUMAN"
 
-      - name: Post or update AI Metrics issue
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const before = context.payload.before;
-            const after = context.payload.after;
-            const ai = parseInt(process.env.AI_LINES || '${{ steps.calc.outputs.AI_LINES }}') || 0;
-            const added = parseInt(process.env.TOTAL_ADDED || '${{ steps.calc.outputs.TOTAL_ADDED }}') || 0;
-            const human = parseInt(process.env.HUMAN_LINES || '${{ steps.calc.outputs.HUMAN_LINES }}') || 0;
-
-            const title = 'AI Metrics Summary (master)';
-            const body = [
-              '## 🧾 AI Metrics (master)',
-              '',
-              `Push range: ${before} → ${after}`,
-              `Total lines introduced: ${added}`,
-              `AI-tagged lines: ${ai}`,
-              `Human-written lines: ${human}`,
-              '',
-              'This issue is updated automatically by the CI to summarize AI vs human contributions for pushes to `master`.'
-            ].join('\n');
-
-            // find existing issue by title
-            const issues = await github.rest.issues.listForRepo({ owner, repo, state: 'open' });
-            const existing = issues.data.find(i => i.title === title);
-            if (existing) {
-              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
-            } else {
-              await github.rest.issues.create({ owner, repo, title, body });
-            }
+      - name: Display AI Metrics Summary
+        env:
+          AI_LINES: ${{ steps.calc.outputs.AI_LINES }}
+          TOTAL_ADDED: ${{ steps.calc.outputs.TOTAL_ADDED }}
+          HUMAN_LINES: ${{ steps.calc.outputs.HUMAN_LINES }}
+        run: |
+          echo "====================================================================="
+          echo "AI METRICS SUMMARY (master push)"
+          echo "====================================================================="
+          echo "Push range: ${{ github.event.before }} → ${{ github.event.after }}"
+          echo "Total lines introduced: $TOTAL_ADDED"
+          echo "AI-tagged lines: $AI_LINES"
+          echo "Human-written lines: $HUMAN_LINES"
+          echo "====================================================================="
