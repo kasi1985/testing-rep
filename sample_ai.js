@@ -2,6 +2,10 @@ console.log('This is a single AI-tagged test line');
 console.log('This is a second AI-tagged test line');
 console.log('This is a third AI-tagged test line');
 console.log('This is a 1 AI-tagged test line');
+console.log('AI test line 12');
+console.log('AI test line 13');
+console.log('AI test line 10');
+console.log('AI test line 11');
 
 console.log('This is a single AI-tagged test line');
 console.log('This is a second AI-tagged test line');
