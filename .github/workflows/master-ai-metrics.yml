@@ -37,15 +37,13 @@ jobs:
           fi
 
           TOTAL_AI=0
-          while IFS= read -r f; do
+          for f in $changed_files; do
             [ -z "$f" ] && continue
             # make sure file exists at AFTER
             if git ls-tree -r --name-only "$AFTER" | grep -qx "$f"; then
               TOTAL_AI=$((TOTAL_AI + ai_count))
             fi
-          done <<EOF
-$changed_files
-EOF
+          done
 
           TOTAL_HUMAN=$((TOTAL_ADDED - TOTAL_AI))
           if [ "$TOTAL_HUMAN" -lt 0 ]; then TOTAL_HUMAN=0; fi
