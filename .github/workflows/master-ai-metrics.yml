@@ -41,7 +41,7 @@ jobs:
             [ -z "$f" ] && continue
             # make sure file exists at AFTER
             if git ls-tree -r --name-only "$AFTER" | grep -qx "$f"; then
-              TOTAL_AI=$((TOTAL_AI + ai_count))
+              TOTAL_AI=$((TOTAL_AI + ${ai_count:-0}))
             fi
           done
 
