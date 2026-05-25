@@ -1,0 +1,11 @@
+name: Run AI Code Metrics on Pull Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+jobs:
+  invoke-reusable:
+    uses: ./.github/workflows/ai-metrics-reusable.yml
+    with:
+      runner: 'ubuntu-latest'

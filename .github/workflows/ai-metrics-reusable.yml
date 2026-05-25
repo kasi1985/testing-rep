@@ -1,0 +1,116 @@
+name: AI Code Metrics Tracker
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner label to use for the job (default: self-hosted)'
+        required: false
+        type: string
+        default: 'self-hosted'
+
+jobs:
+  log-metrics:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      AI_LINES: ${{ steps.calc.outputs.AI_LINES }}
+      TOTAL_ADDED: ${{ steps.calc.outputs.TOTAL_ADDED }}
+      HUMAN_LINES: ${{ steps.calc.outputs.HUMAN_LINES }}
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Fetch target base branch
+        run: |
+          BASE_REF=${{ github.event.pull_request.base.ref }}
+          echo "Fetching base branch: $BASE_REF"
+          git fetch origin "$BASE_REF":refs/remotes/origin/"$BASE_REF" --no-tags --no-recurse-submodules
+
+      - name: Calculate AI and Human Lines
+        id: calc
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "======================================================================"
+          echo " PROCESSING PULL REQUEST #${{ github.event.pull_request.number }}"
+          echo "======================================================================"
+
+          BASE_BRANCH="origin/${{ github.event.pull_request.base.ref }}"
+
+          # Sum AI lines from commit messages matching the tag
+          TOTAL_AI=$(git log "$BASE_BRANCH"..HEAD --grep="AI-Lines-Of-Code:" --format="%B" | awk '/AI-Lines-Of-Code:/ {sum+=$2} END {print sum+0}')
+
+          # Total lines added in PR (sum of additions across the combined diff)
+          TOTAL_ADDED=$(git diff --numstat "$BASE_BRANCH"...HEAD | awk '{add+=$1} END {print add+0}')
+
+          # Human-written lines = total added - AI annotated lines
+          TOTAL_HUMAN=$((TOTAL_ADDED - TOTAL_AI))
+          if [ "$TOTAL_HUMAN" -lt 0 ]; then TOTAL_HUMAN=0; fi
+
+          echo "AI_LINES=$TOTAL_AI" >> $GITHUB_OUTPUT
+          echo "TOTAL_ADDED=$TOTAL_ADDED" >> $GITHUB_OUTPUT
+          echo "HUMAN_LINES=$TOTAL_HUMAN" >> $GITHUB_OUTPUT
+
+          echo "Developer Identity:    ${{ github.event.pull_request.user.login }}"
+          echo "Total Lines Introduced: $TOTAL_ADDED"
+          echo "------------------------------------------------------------------"
+          echo " $TOTAL_AI LOC AI generated or AI assisted"
+          echo " $TOTAL_HUMAN LOC written manually by developers"
+          echo "======================================================================"
+
+      - name: Post metrics as PR comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const ai = parseInt('${{ steps.calc.outputs.AI_LINES }}') || 0;
+            const added = parseInt('${{ steps.calc.outputs.TOTAL_ADDED }}') || 0;
+            const human = parseInt('${{ steps.calc.outputs.HUMAN_LINES }}') || 0;
+
+            const lines = [
+              '## 🧾 AI Code Metrics',
+              '',
+              'Developer: @' + context.payload.pull_request.user.login,
+              'Total lines introduced: ' + added,
+              'AI-tagged lines (AI-Lines-Of-Code): ' + ai,
+              'Human-written lines: ' + human,
+              '',
+              'This comment is posted automatically by the CI to summarize AI vs human contributions in this PR.'
+            ];
+            const body = lines.join('\n');
+
+            // find existing comment to update
+            const resp = await github.rest.issues.listComments({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber });
+            const comments = resp.data || [];
+            const marker = '## 🧾 AI Code Metrics';
+            const existing = comments.find(function(c) { return c.body && c.body.indexOf(marker) !== -1; });
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body: body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body: body });
+            }
+
+      - name: Optionally fail to block merge (disabled by default)
+        if: env.BLOCK_ON_THRESHOLD == '1'
+        env:
+          AI_THRESHOLD: 1000
+          BLOCK_ON_THRESHOLD: 0
+          # expose the computed output as an env var so the shell can read it
+          AI_LINES: ${{ steps.calc.outputs.AI_LINES }}
+        run: |
+          # This step is an example. To enable blocking, set BLOCK_ON_THRESHOLD=1 in workflow env or replace the conditional.
+          if [ "$BLOCK_ON_THRESHOLD" = "1" ]; then
+            if [ ${AI_LINES:-0} -gt $AI_THRESHOLD ]; then
+              echo "AI generated lines ${AI_LINES} exceeds threshold ${AI_THRESHOLD}. Failing check to block merge."
+              exit 1
+            fi
+          fi
