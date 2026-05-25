@@ -22,11 +22,19 @@ jobs:
       HUMAN_LINES: ${{ steps.calc.outputs.HUMAN_LINES }}
 
     steps:
-      - name: Checkout PR head
+      - name: Checkout base branch (safe)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Checkout the base branch first to avoid executing untrusted code from the PR head
+          ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
+
+      - name: Fetch and prepare PR head for diffing (no code execution)
+        run: |
+          # Fetch the PR head commit and make it available locally for diffing.
+          # Do NOT run any scripts from the head; only inspect files.
+          git fetch origin ${{ github.event.pull_request.head.sha }} --no-tags || true
+          git checkout --detach ${{ github.event.pull_request.head.sha }} || git rev-parse --verify ${{ github.event.pull_request.head.sha }}
 
       - name: Fetch target base branch
         run: |

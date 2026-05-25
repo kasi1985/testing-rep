@@ -4,8 +4,8 @@ permissions:
   issues: write
 
 on:
-  pull_request:
-    # Run when the branch is updated or the PR is marked ready — avoids running on initial open
+  pull_request_target:
+    # Run in the base repository context when the branch is updated or PR is marked ready
     types: [synchronize, ready_for_review, reopened]
 
 jobs:
