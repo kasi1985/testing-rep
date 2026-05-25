@@ -58,14 +58,14 @@ jobs:
 
           # Count AI-tagged lines by scanning the HEAD version of changed files for START/END tags
           TOTAL_AI=0
-          for f in $(git diff --name-only "$BASE_BRANCH"...HEAD); do
-            ai_count=0  # Initialize to 0 for each file
+          # Use NUL-delimited filenames to be robust to spaces/newlines in filenames
+          while IFS= read -r -d '' f; do
+            [ -z "$f" ] && continue
             # ensure file exists at HEAD (skip deleted files)
             if git ls-tree -r --name-only HEAD | grep -qx "$f"; then
-              # extract AI-generated sections from the HEAD file and count their lines
-              TOTAL_AI=$((TOTAL_AI + ai_count))
+              TOTAL_AI=$((TOTAL_AI + ${ai_count:-0}))
             fi
-          done
+          done < <(git diff --name-only -z "$BASE_BRANCH"...HEAD)
 
           # Human-written lines = total added - AI detected lines
           TOTAL_HUMAN=$((TOTAL_ADDED - TOTAL_AI))
