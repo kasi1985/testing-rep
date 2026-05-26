@@ -11,6 +11,7 @@ on:
 jobs:
   calc-and-report:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,37 +23,50 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BEFORE=${{ github.event.before }}
-          AFTER=${{ github.sha }}
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
 
           echo "Processing push range: $BEFORE..$AFTER"
 
+          # Determine changed files and total added lines
           if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            # first push: count all lines in repository at AFTER
-            TOTAL_ADDED=$(git ls-files | xargs -I{} git show "$AFTER":"{}" 2>/dev/null | wc -l || echo 0)
-            changed_files=$(git ls-files)
+            # First push to branch: count all lines at AFTER
+            TOTAL_ADDED=$(git ls-files | xargs -I{} git show "$AFTER:{}" 2>/dev/null | wc -l || echo 0)
+            mapfile -t changed_files < <(git ls-files)
           else
-            TOTAL_ADDED=$(git diff --numstat "$BEFORE".."$AFTER" | awk '{add+=$1} END {print add+0}')
-            changed_files=$(git diff --name-only "$BEFORE".."$AFTER")
+            TOTAL_ADDED=$(git diff --numstat "$BEFORE..$AFTER" | awk '{add+=$1} END {print add+0}')
+            mapfile -t changed_files < <(git diff --name-only "$BEFORE..$AFTER")
           fi
 
           TOTAL_AI=0
-          while IFS= read -r f; do
+
+          for f in "${changed_files[@]}"; do
             [ -z "$f" ] && continue
-            # make sure file exists at AFTER
-            if git ls-tree -r --name-only "$AFTER" | grep -qx "$f"; then
-              TOTAL_AI=$((TOTAL_AI + ai_count))
+
+            # Skip files that don't exist at AFTER (deleted files)
+            if ! git ls-tree -r --name-only "$AFTER" | grep -qx "$f"; then
+              continue
             fi
-          done <<EOF
-$changed_files
-EOF
+
+            # Count AI-tagged lines using START/END markers in the file at AFTER
+            ai_count=$(git show "$AFTER:$f" 2>/dev/null \
+              | awk '
+                /AI-GENERATED-START/ { inside=1; next }
+                /AI-GENERATED-END/   { inside=0; next }
+                inside               { count++ }
+                END                  { print count+0 }
+              ')
+
+            TOTAL_AI=$((TOTAL_AI + ai_count))
+          done
 
           TOTAL_HUMAN=$((TOTAL_ADDED - TOTAL_AI))
           if [ "$TOTAL_HUMAN" -lt 0 ]; then TOTAL_HUMAN=0; fi
 
-          echo "AI_LINES=$TOTAL_AI" >> $GITHUB_OUTPUT
-          echo "TOTAL_ADDED=$TOTAL_ADDED" >> $GITHUB_OUTPUT
-          echo "HUMAN_LINES=$TOTAL_HUMAN" >> $GITHUB_OUTPUT
+          echo "AI_LINES=$TOTAL_AI"       >> "$GITHUB_OUTPUT"
+          echo "TOTAL_ADDED=$TOTAL_ADDED" >> "$GITHUB_OUTPUT"
+          echo "HUMAN_LINES=$TOTAL_HUMAN" >> "$GITHUB_OUTPUT"
 
           echo "Computed: AI=$TOTAL_AI, Added=$TOTAL_ADDED, Human=$TOTAL_HUMAN"
 
@@ -61,31 +75,38 @@ EOF
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const before = context.payload.before;
-            const after = context.payload.after;
-            const ai = parseInt(process.env.AI_LINES || '${{ steps.calc.outputs.AI_LINES }}') || 0;
-            const added = parseInt(process.env.TOTAL_ADDED || '${{ steps.calc.outputs.TOTAL_ADDED }}') || 0;
-            const human = parseInt(process.env.HUMAN_LINES || '${{ steps.calc.outputs.HUMAN_LINES }}') || 0;
+            const owner   = context.repo.owner;
+            const repo    = context.repo.repo;
+            const before  = context.payload.before;
+            const after   = context.payload.after;
+
+            const ai      = parseInt('${{ steps.calc.outputs.AI_LINES }}')    || 0;
+            const added   = parseInt('${{ steps.calc.outputs.TOTAL_ADDED }}') || 0;
+            const human   = parseInt('${{ steps.calc.outputs.HUMAN_LINES }}') || 0;
+            const pct     = added > 0 ? ((ai / added) * 100).toFixed(1) : '0.0';
 
             const title = 'AI Metrics Summary (master)';
-            const body = [
-              '## 🧾 AI Metrics (master)',
+            const body  = [
+              '## 🧾 AI Metrics — `master` branch',
               '',
-              `Push range: ${before} → ${after}`,
-              `Total lines introduced: ${added}`,
-              `AI-tagged lines: ${ai}`,
-              `Human-written lines: ${human}`,
+              `| Metric | Value |`,
+              `|--------|-------|`,
+              `| Push range | \`${before.slice(0,7)}\` → \`${after.slice(0,7)}\` |`,
+              `| Total lines added | ${added} |`,
+              `| AI-generated lines | ${ai} (${pct}%) |`,
+              `| Human-written lines | ${human} |`,
               '',
-              'This issue is updated automatically by the CI to summarize AI vs human contributions for pushes to `master`.'
+              '_This issue is updated automatically by CI on every push to `master`._'
             ].join('\n');
 
-            // find existing issue by title
-            const issues = await github.rest.issues.listForRepo({ owner, repo, state: 'open' });
+            // Find existing open issue by title and update, or create new
+            const issues   = await github.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 100 });
             const existing = issues.data.find(i => i.title === title);
+
             if (existing) {
               await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              console.log(`Updated issue #${existing.number}`);
             } else {
-              await github.rest.issues.create({ owner, repo, title, body });
+              const created = await github.rest.issues.create({ owner, repo, title, body });
+              console.log(`Created issue #${created.data.number}`);
             }
